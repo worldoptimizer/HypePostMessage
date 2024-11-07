@@ -1,11 +1,12 @@
 /*!
- * HypePostMessage v1.0.0
+ * HypePostMessage v1.0.1
  * Copyright (2024) Max Ziebell, (https://maxziebell.de). MIT-license
  */
 
 /*
  * Version-History
  * 1.0.0 Released under MIT-license
+ * 1.0.1 Fixed propagation of messages
  */
 
 if (!window.HypePostMessage) {
@@ -37,17 +38,26 @@ if (!window.HypePostMessage) {
         type: "HypePostEvent",
         name: eventName,
         data: eventData,
-        propagate: propagate
+        propagate: propagate,
+        direction: direction,
       };
 
       try {
-        if (direction === 'parent') {
-          window.parent.postMessage(message, "*");
-        } else if (direction === 'children') {
-          const iframes = document.querySelectorAll(selector);
-          iframes.forEach(iframe => {
-            iframe.contentWindow.postMessage(message, "*");
-          });
+        switch (direction) {
+          case 'parent':
+            window.parent.postMessage(JSON.parse(JSON.stringify(message)), "*");
+            break;
+          
+          case 'children':
+            const iframes = document.querySelectorAll(selector);
+            const cleanedMessage = JSON.parse(JSON.stringify(message));
+            iframes.forEach(iframe => {
+              iframe.contentWindow.postMessage(cleanedMessage, "*");
+            });
+            break;
+          
+          default:
+            console.warn(`HypePostMessage: Unknown direction '${direction}'`);
         }
       } catch (err) {
         console.warn(`HypePostMessage: Error posting event to ${direction}:`, err);
@@ -61,7 +71,7 @@ if (!window.HypePostMessage) {
     function handlePostEvent(event) {
       if (event.data.type !== "HypePostEvent") return;
 
-      const { name, data, propagate } = event.data;
+      const { name, data, propagate, direction } = event.data;
 
       // Dispatch a custom event within the document
       const customEvent = new CustomEvent("HypePostEventReceived", {
@@ -69,12 +79,13 @@ if (!window.HypePostMessage) {
       });
       document.dispatchEvent(customEvent);
 
-      // Handle propagation based on the propagate flag
-      if (propagate) {
-        const isParent = window.parent && window.parent !== window;
-        if (isParent) {
+      // Handle propagation based on the propagate flag and current direction
+      if (propagate && direction) {
+        const hasParent = window.parent && window.parent !== window;
+        // Only propagate in the same direction we received the event from
+        if (direction === 'parent' && hasParent) {
           postEvent(name, data, { propagate: true, direction: 'parent' });
-        } else {
+        } else if (direction === 'children') {
           postEvent(name, data, { propagate: true, direction: 'children' });
         }
       }
@@ -145,13 +156,13 @@ if (!window.HypePostMessage) {
       hypeDocument.postBehaviorToChildren = function (behaviorName, options = {}) {
         postBehavior(hypeDocument, behaviorName, { ...options, direction: 'children' });
       };
-
-      document.addEventListener("HypePostEventReceived", function(receivedEvent) {
-        if (receivedEvent.detail.name === "HypePostMessage") {
-          handleBehaviorEvent(receivedEvent);
-        }
-      });
     }
+
+    document.addEventListener("HypePostEventReceived", function(receivedEvent) {
+      if (receivedEvent.detail.name === "HypePostMessage") {
+        handleBehaviorEvent(receivedEvent);
+      }
+    });
 
     // Initialize event listeners
     window.addEventListener("message", handlePostEvent, false);
@@ -164,7 +175,7 @@ if (!window.HypePostMessage) {
 
     // Public API
     return {
-      version: '1.0.0',
+      version: '1.0.1',
       Propagation,
       postEvent,
       postBehavior,
